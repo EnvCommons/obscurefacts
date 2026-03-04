@@ -88,5 +88,160 @@
         "id": "obscure_018",
         "question": "A Premier League player that has played for managers with a maximum birth date range of 60 years?",
         "answer": "James Milner"
+    },
+    {
+        "id": "obscure_019",
+        "question": "Famous angry Canadian geese can be found outside which accommodation hall at the University of Warwick?",
+        "answer": "Lakeside"
+    },
+    {
+        "id": "obscure_020",
+        "question": "Ten thousand weapons raised for a girl. Who is being referred to? And by whom?",
+        "answer": "Marie Antoinette by Edmund Burke"
+    },
+    {
+        "id": "obscure_021",
+        "question": "Playing Elden Ring when a text came through that led him to leave a streaming platform?",
+        "answer": "Dr. Disrespect"
+    },
+    {
+        "id": "obscure_022",
+        "question": "Where do pupils at Ipswich school traditionally play sports like rugby?",
+        "answer": "Nottcutts"
+    },
+    {
+        "id": "obscure_023",
+        "question": "Desserts at this London restaurant include a sesame seed dessert with matcha, and a chocolate brownie and matcha crumble with a chocolate tree with candyfloss.",
+        "answer": "Aqua Kyoto"
+    },
+    {
+        "id": "obscure_024",
+        "question": "An English country house where you can eat fish with bugs on it.",
+        "answer": "Beaverbrook Surrey"
+    },
+    {
+        "id": "obscure_025",
+        "question": "Famous restaurant in the Pacific which tells clients to \"Trust Me!\"",
+        "answer": "Sushi Sasabune"
+    },
+    {
+        "id": "obscure_026",
+        "question": "Jacob Rees-Mogg's famous humorist?",
+        "answer": "P. G. Wodehouse"
+    },
+    {
+        "id": "obscure_027",
+        "question": "Nearest place I can get a burger next to Liberty London?",
+        "answer": "Five Guys"
+    },
+    {
+        "id": "obscure_028",
+        "question": "I start at Canary Wharf. Go down Elizabeth line one stop, change overground for one stop, pass through a tunnel then arrive at the station. Where am I?",
+        "answer": "Shoreditch High Street"
+    },
+    {
+        "id": "obscure_029",
+        "question": "How many ABC stores would I pass (and would be visible) if I walked from Ritz-Carlton Waikiki to Surfrider Moana hotel in Waikiki down Kalakaua Avenue?",
+        "answer": "4"
+    },
+    {
+        "id": "obscure_030",
+        "question": "Papers with Code team once tried to make an evaluation infrastructure product. What was it called?",
+        "answer": "Sotabench"
+    },
+    {
+        "id": "obscure_031",
+        "question": "Enoch Powell's favorite song?",
+        "answer": "The Renunciation of Siegfried (from Götterdämmerung) - Wagner"
+    },
+    {
+        "id": "obscure_032",
+        "question": "\"That he who have no stomach for this fight, let him depart\". Who was present at a young age who'd later become a headline movie actor?",
+        "answer": "Christian Bale"
+    },
+    {
+        "id": "obscure_033",
+        "question": "When General Reasoning Inc first went public, it did what?",
+        "answer": "It launched with a resource for reasoning traces for language models"
+    },
+    {
+        "id": "obscure_034",
+        "question": "What trick is there to benchmax HellaSwag performance without training on test?",
+        "answer": "WikiHow articles are heavily in-domain so boost performance"
+    },
+    {
+        "id": "obscure_035",
+        "question": "MATH became problematic to download (a deep learning dataset) because?",
+        "answer": "Art of Problem Solving website asked for hosting platforms to take the dataset down."
+    },
+    {
+        "id": "obscure_036",
+        "question": "Which language model introduced <work> thinking tags?",
+        "answer": "Galactica"
+    },
+    {
+        "id": "obscure_037",
+        "question": "I'm thinking of a deep learning paper with a famously large appendix?",
+        "answer": "Self-Normalizing Neural Networks (SELU)"
+    },
+    {
+        "id": "obscure_038",
+        "question": "I'm thinking of a famous 2010s deep learning architecutre where the theoretical loss function (mentioned in papers) differs from the loss function that most used in practice (for the default implementation of this architecture idea)",
+        "answer": "Generative Adversarial Networks (GANs)"
+    },
+    {
+        "id": "obscure_039",
+        "question": "Who was behind the innovation of using public factors in horse racing betting?",
+        "answer": "Bill Bentner and Alan Woods (either answer acceptable)"
+    },
+    {
+        "id": "obscure_040",
+        "question": "Who was the Deputy Director of the Banking and Credit team at HM Treasury in 2011?",
+        "answer": "Gwnyeth Nurse"
+    },
+    {
+        "id": "obscure_041",
+        "question": "William Regal was about to give a tribute for Chris Benoit but saw another wrestler who had a strange look on his face, who subsequently changed his view on what had happened. Who was this other wrestler?",
+        "answer": "John Bradshaw Layfield (JBL)"
+    },
+    {
+        "id": "obscure_042",
+        "question": "Papers with Code had an early competitor in 2018/2019. Who were they called?",
+        "answer": "stateoftheart.ai"
+    },
+    {
+        "id": "obscure_043",
+        "question": "Were there any preceding popular products for tracking sota other than Papers with Code?",
+        "answer": "NLP-Progress by Seb Ruder"
+    },
+    {
+        "id": "obscure_044",
+        "question": "Why did Papers with Code cease to be improved/maintained?",
+        "answer": "The engineers moved onto LLMs with Galactica and then Llama."
+    },
+    {
+        "id": "obscure_045",
+        "question": "What were the names of the three main LLM teams at Meta in 2022?",
+        "answer": "Zetta, Galactica and Llama"
+    },
+    {
+        "id": "obscure_046",
+        "question": "What was the original codename for the Llama project?",
+        "answer": "Genesis"
+    },
+    {
+        "id": "obscure_047",
+        "question": "Galactica and Llama were part of a group within FAIR for high-ambition projects. What was this called?",
+        "answer": "FAIR Accel"
+    },
+    {
+        "id": "obscure_048",
+        "question": "What paper came out on same day as Transformer paper that also got a lot of attention?",
+        "answer": "SELU paper (Self-Normalizing Neural Networks (SELU)"
+    },
+    {
+        "id": "obscure_049",
+        "question": "Thinking of a restaurant chain that has several stores in London, has a \"chocolate bombe\" as a dessert, and the decor is green and tropical.",
+        "answer": "The Ivy"
     }
 ]

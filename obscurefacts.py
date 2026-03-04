@@ -12,8 +12,8 @@ from openreward.environments import Environment, JSONObject, TextBlock, ToolOutp
 
 # ============= Data Loading =============
 # Check for /orwd_data first (production), then fall back to local path (development)
-if Path("/orwd_data/obscurefacts").exists():
-    DATA_PATH = Path("/orwd_data/obscurefacts")
+if Path("/orwd_data/").exists():
+    DATA_PATH = Path("/orwd_data/")
 else:
     DATA_PATH = Path(__file__).parent
 

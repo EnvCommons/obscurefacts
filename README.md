@@ -4,7 +4,7 @@
 
 ## Description
 
-ObscureFacts is an environment for evaluating an agent's ability to find answers to obscure trivia questions using web search. Agents must use web search tools to research and answer 18 intentionally difficult factual questions spanning sports, technology, local history, and academia.
+ObscureFacts is an environment for evaluating an agent's ability to find answers to obscure trivia questions using web search. Agents must use web search tools to research and answer 49 intentionally difficult factual questions spanning sports, technology, local history, and academia.
 
 ## Capabilities
 
@@ -19,13 +19,13 @@ Agents are given a standard environment with no special compute requirements.
 
 ## License
 
-[ORLv1](https://openreward.ai/orlv1.md).
+[MIT](https://opensource.org/licenses/MIT)
 
 ## Tasks
 
 There is one split in this environment:
 
-- **Test**: 18 obscure trivia questions
+- **Test**: 49 obscure trivia questions
 
 Questions span diverse domains including sports statistics, technology history, local history, and academic trivia.
 
@@ -35,7 +35,7 @@ This is a multi-turn environment. The agent searches the web, gathers informatio
 
 ## Data
 
-Task data consists of 18 curated trivia questions with reference answers stored in a JSON file. Task data is stored on the OpenReward platform.
+Task data consists of 49 curated trivia questions with reference answers stored in a JSON file. Task data is stored on the OpenReward platform.
 
 ## Tools
 
@@ -51,7 +51,7 @@ ObscureFacts is a multi-turn environment. Agents iteratively search the web, fet
 
 ## Environment Difficulty
 
-Questions are intentionally obscure and require extensive web research. Many involve hyper-specific details such as exact statistics, names, or dates that are difficult to find.
+[Put environment difficulty here]
 
 ## Other Environment Requirements
 
