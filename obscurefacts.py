@@ -78,13 +78,13 @@ class ObscureFacts(Environment):
     @classmethod
     def list_splits(cls) -> list[str]:
         """Return available splits"""
-        return ["test"]
+        return ["train"]
 
     @classmethod
     def list_tasks(cls, split: str) -> list[JSONObject]:
         """Return task specifications for a given split (without answers)"""
-        if split != "test":
-            raise ValueError(f"Unknown split: {split}. Available splits: ['test']")
+        if split != "train":
+            raise ValueError(f"Unknown split: {split}. Available splits: ['train']")
         # Return only id and question - NOT the answer
         return [{"id": task["id"], "question": task["question"]} for task in TASKS]
 
