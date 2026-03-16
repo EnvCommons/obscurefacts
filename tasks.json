@@ -244,4 +244,10 @@
         "question": "Thinking of a restaurant chain that has several stores in London, has a \"chocolate bombe\" as a dessert, and the decor is green and tropical.",
         "answer": "The Ivy"
     }
+    ,
+    {
+        "id": "obscure_050",
+        "question": "Little bit of onion....smells fantastic...mmmm. It's feeding time...Sometimes I pray, what can I do? what can I do?....Welcome to Hokkaido! Wow, this looks amazing....there are all excerpts from a advertisement for a TV show. Which channel was the ad shown?",
+        "answer": "BBC News"
+    }
 ]
