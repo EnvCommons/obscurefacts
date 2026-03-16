@@ -45,6 +45,8 @@ Task data consists of 49 curated trivia questions with reference answers stored 
 | `fetch_url` | Fetch and return full text content from a specific URL (truncated to 8,000 characters). |
 | `submit_answer` | Submit a final answer for semantic grading against the reference answer. |
 
+Note that the `fetch_url` and `web_search` tools require Tavily, but are optional. If you want to use a different provider for search you can exclude these tools and use external tools instead.
+
 ## Time Horizon
 
 ObscureFacts is a multi-turn environment. Agents iteratively search the web, fetch page content, and synthesize information before submitting a final answer.
