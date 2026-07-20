@@ -7,7 +7,7 @@ import openai
 from pydantic import BaseModel
 from tavily import AsyncTavilyClient
 
-from openreward.environments import Environment, JSONObject, TextBlock, ToolOutput, tool
+from openreward.environments import Environment, JSONObject, TextBlock, ToolOutput, terminal, tool
 
 
 # ============= Data Loading =============
@@ -95,11 +95,10 @@ class ObscureFacts(Environment):
 You have access to the following tools:
 - web_search: Search the web for information
 - fetch_url: Get the full content of a specific URL
-- submit_answer: Submit your final answer
 
 Question: {self.question}
 
-Search thoroughly and verify your answer before submitting. When you have your answer, submit it using the submit_answer tool."""
+Search thoroughly and verify your answer. When you have your answer, reply with it as an ordinary message (no tool call) — that message is graded."""
 
         return [TextBlock(text=prompt_text)]
 
@@ -201,11 +200,15 @@ Search thoroughly and verify your answer before submitting. When you have your a
                 finished=False
             )
 
+    @terminal
     @tool
     async def submit_answer(self, params: SubmitAnswerInput) -> ToolOutput:
         """
-        Submit your final answer to the trivia question.
-        This tool will grade your answer against the golden answer and end the episode.
+        Grade the assistant's final message against the golden answer.
+
+        Terminal tool: hidden from the agent, which replies with its answer as
+        an ordinary message rather than calling a tool. The harness routes that
+        message text here for semantic LLM grading, and the episode ends.
         """
         grader_result = await self._grade_answer(params.answer)
 

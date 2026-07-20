@@ -43,7 +43,10 @@ Task data consists of 49 curated trivia questions with reference answers stored 
 |------|-------------|
 | `web_search` | Search the web using Tavily. Returns up to 5 results with titles, URLs, and snippets. |
 | `fetch_url` | Fetch and return full text content from a specific URL (truncated to 8,000 characters). |
-| `submit_answer` | Submit a final answer for semantic grading against the reference answer. |
+
+Grading runs through a hidden `@terminal` tool rather than a tool the agent can
+call: replying with a plain message ends the rollout, and that message text is
+semantically graded against the reference answer.
 
 Note that the `fetch_url` and `web_search` tools require Tavily, but are optional. If you want to use a different provider for search you can exclude these tools and use external tools instead.
 
