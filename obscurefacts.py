@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -102,57 +103,73 @@ Search thoroughly and verify your answer. When you have your answer, reply with 
 
         return [TextBlock(text=prompt_text)]
 
+    MAX_TAVILY_ATTEMPTS = 3
+
+    async def _call_tavily(self, op, **kwargs):
+        """
+        Run a Tavily call with a bounded retry budget, then let the exception
+        propagate.
+
+        A transient blip is worth retrying; a persistent failure (plan/quota
+        limit, bad key, outage) must reach the platform, which retries the tool
+        call and terminates the rollout with a blank reward if it still fails.
+        Returning the error as tool output instead would leave the agent
+        re-issuing a dead call until the wall-clock cap, never reaching
+        submit_answer, and score the rollout 0.0 as though it had answered
+        wrongly.
+        """
+        for attempt in range(self.MAX_TAVILY_ATTEMPTS):
+            try:
+                return await op(**kwargs)
+            except Exception:
+                if attempt == self.MAX_TAVILY_ATTEMPTS - 1:
+                    raise
+                await asyncio.sleep(2 ** attempt)
+
     @tool
     async def web_search(self, params: WebSearchInput) -> ToolOutput:
         """
         Search the web using Tavily. Returns search results with titles, URLs, and snippets.
         Use fetch_url tool to get full content from specific URLs if needed.
         """
-        try:
-            # Use Tavily search API
-            response = await self.tavily_client.search(
-                query=params.query,
-                search_depth="basic",
-                max_results=5
-            )
+        response = await self._call_tavily(
+            self.tavily_client.search,
+            query=params.query,
+            search_depth="basic",
+            max_results=5
+        )
 
-            # Format results
-            results = response.get("results", [])
-            if not results:
-                return ToolOutput(
-                    blocks=[TextBlock(text="No search results found.")],
-                    metadata={"query": params.query, "results": []},
-                    reward=0.0,
-                    finished=False
-                )
-
-            # Build display text
-            display_parts = [f"Search results for: {params.query}\n"]
-            for i, result in enumerate(results, 1):
-                title = result.get("title", "No title")
-                url = result.get("url", "")
-                snippet = result.get("content", "")
-                display_parts.append(f"{i}. {title}\n   URL: {url}\n   {snippet}\n")
-
-            display_text = "\n".join(display_parts)
-
+        # Format results. An empty result set is a real answer to the query,
+        # not a failure — the agent can act on it by searching differently.
+        results = response.get("results", [])
+        if not results:
             return ToolOutput(
-                blocks=[TextBlock(text=display_text)],
-                metadata={
-                    "query": params.query,
-                    "results": results,
-                    "count": len(results)
-                },
+                blocks=[TextBlock(text="No search results found.")],
+                metadata={"query": params.query, "results": []},
                 reward=0.0,
                 finished=False
             )
-        except Exception as e:
-            return ToolOutput(
-                blocks=[TextBlock(text=f"Web search failed: {str(e)}")],
-                metadata={"query": params.query, "error": str(e)},
-                reward=0.0,
-                finished=False
-            )
+
+        # Build display text
+        display_parts = [f"Search results for: {params.query}\n"]
+        for i, result in enumerate(results, 1):
+            title = result.get("title", "No title")
+            url = result.get("url", "")
+            snippet = result.get("content", "")
+            display_parts.append(f"{i}. {title}\n   URL: {url}\n   {snippet}\n")
+
+        display_text = "\n".join(display_parts)
+
+        return ToolOutput(
+            blocks=[TextBlock(text=display_text)],
+            metadata={
+                "query": params.query,
+                "results": results,
+                "count": len(results)
+            },
+            reward=0.0,
+            finished=False
+        )
 
     @tool
     async def fetch_url(self, params: FetchUrlInput) -> ToolOutput:
@@ -160,45 +177,37 @@ Search thoroughly and verify your answer. When you have your answer, reply with 
         Fetch and return the full text content from a specific URL using Tavily's extract method.
         Use this after web_search to get complete information from a page.
         """
-        try:
-            # Use Tavily's extract method
-            response = await self.tavily_client.extract(urls=[params.url])
+        response = await self._call_tavily(self.tavily_client.extract, urls=[params.url])
 
-            # Get the extracted content
-            results = response.get("results", [])
-            if not results:
-                return ToolOutput(
-                    blocks=[TextBlock(text=f"No content extracted from {params.url}")],
-                    metadata={"url": params.url, "results": []},
-                    reward=0.0,
-                    finished=False
-                )
-
-            # Get the first result (we only passed one URL)
-            result = results[0]
-            raw_content = result.get("raw_content", "")
-
-            # Truncate if too long
-            max_length = 8000
-            if len(raw_content) > max_length:
-                raw_content = raw_content[:max_length] + "...\n[Content truncated]"
-
+        # A page Tavily can't extract is useful feedback — the agent should try
+        # another URL rather than have the rollout thrown away.
+        results = response.get("results", [])
+        if not results:
             return ToolOutput(
-                blocks=[TextBlock(text=f"Content from {params.url}:\n\n{raw_content}")],
-                metadata={
-                    "url": params.url,
-                    "length": len(raw_content)
-                },
+                blocks=[TextBlock(text=f"No content extracted from {params.url}")],
+                metadata={"url": params.url, "results": []},
                 reward=0.0,
                 finished=False
             )
-        except Exception as e:
-            return ToolOutput(
-                blocks=[TextBlock(text=f"Failed to fetch URL: {str(e)}")],
-                metadata={"url": params.url, "error": str(e)},
-                reward=0.0,
-                finished=False
-            )
+
+        # Get the first result (we only passed one URL)
+        result = results[0]
+        raw_content = result.get("raw_content", "")
+
+        # Truncate if too long
+        max_length = 8000
+        if len(raw_content) > max_length:
+            raw_content = raw_content[:max_length] + "...\n[Content truncated]"
+
+        return ToolOutput(
+            blocks=[TextBlock(text=f"Content from {params.url}:\n\n{raw_content}")],
+            metadata={
+                "url": params.url,
+                "length": len(raw_content)
+            },
+            reward=0.0,
+            finished=False
+        )
 
     @terminal
     @tool
@@ -278,29 +287,30 @@ Format:
 
 CORRECT or INCORRECT"""
 
-        try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-5-mini",
-                messages=[{"role": "user", "content": grader_prompt}],
+        # Grader failures are deliberately not caught. "Couldn't grade" is not
+        # the same as "answered wrongly": scoring it 0.0 would penalise the
+        # agent for infrastructure it can't control and skew reward stats.
+        # Letting it raise hands the call to the platform's retry, and a
+        # persistent failure ends the rollout with a blank reward.
+        response = await self.openai_client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[{"role": "user", "content": grader_prompt}],
+        )
+
+        grading_response = response.choices[0].message.content or ""
+        if not grading_response.strip():
+            raise RuntimeError(
+                f"Grader returned an empty response for task {self.task_id}"
             )
 
-            grading_response = response.choices[0].message.content or ""
+        # Parse CORRECT/INCORRECT
+        upper_response = grading_response.upper()
+        is_correct = "CORRECT" in upper_response and "INCORRECT" not in upper_response
 
-            # Parse CORRECT/INCORRECT
-            upper_response = grading_response.upper()
-            is_correct = "CORRECT" in upper_response and "INCORRECT" not in upper_response
+        reward = 1.0 if is_correct else 0.0
 
-            reward = 1.0 if is_correct else 0.0
-
-            return {
-                "is_correct": is_correct,
-                "justification": grading_response,
-                "reward": reward
-            }
-        except Exception as e:
-            # Fallback for API errors
-            return {
-                "is_correct": False,
-                "justification": f"Grading failed due to error: {str(e)}",
-                "reward": 0.0
-            }
+        return {
+            "is_correct": is_correct,
+            "justification": grading_response,
+            "reward": reward
+        }
