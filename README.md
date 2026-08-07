@@ -39,16 +39,31 @@ Task data consists of 49 curated trivia questions with reference answers stored 
 
 ## Tools
 
+Search and fetch come from the OpenReward SDK's `WebToolset`
+(`toolsets = [WebToolset]`) rather than being implemented in this environment.
+
 | Tool | Description |
 |------|-------------|
-| `web_search` | Search the web using Tavily. Returns up to 5 results with titles, URLs, and snippets. |
-| `fetch_url` | Fetch and return full text content from a specific URL (truncated to 8,000 characters). |
+| `web_search` | Search the web. Takes a `query` and optional `allowed_domains` **or** `blocked_domains`; returns a `Links:` list of `{title, url}` sources. |
+| `web_fetch` | Fetch the content of a URL. Takes a `url` and a `prompt` describing what to extract (truncated to 100 KB). |
 
 Grading runs through a hidden `@terminal` tool rather than a tool the agent can
 call: replying with a plain message ends the rollout, and that message text is
 semantically graded against the reference answer.
 
-Note that the `fetch_url` and `web_search` tools require Tavily, but are optional. If you want to use a different provider for search you can exclude these tools and use external tools instead.
+### Choosing a search backend
+
+Which provider answers those two tools is configuration on the environment
+server, not code here — so swapping it needs no change to this environment:
+
+| `OPENREWARD_SEARCH_BACKEND` | Backend | Needs |
+|---|---|---|
+| unset (default) | `backsearch` — GR's backdated corpus, bounded to an `as_of` cutoff | `OPENREWARD_API_KEY`, or `api_key` in session secrets |
+| `tavily` | Tavily — live web | `TAVILY_API_KEY` (or `tavily_api_key` in session secrets) and `pip install 'openreward[search]'` |
+
+Tavily searches the live web and cannot bound results to a cutoff date, so keep
+the default `backsearch` backend wherever post-cutoff leakage would matter. See
+[Web Tools](https://docs.openreward.ai/environments/web-tools).
 
 ## Time Horizon
 
@@ -61,7 +76,7 @@ ObscureFacts is a multi-turn environment. Agents iteratively search the web, fet
 ## Other Environment Requirements
 
 - **OpenAI API key**: Required for LLM-based answer grading. Pass via `secrets={"openai_api_key": "..."}`.
-- **Tavily API key**: Required for web search and URL extraction. Pass via `secrets={"tavily_api_key": "..."}`.
+- **Search credentials**: Whatever the configured search backend needs — `secrets={"api_key": "..."}` for the default backsearch backend, or `secrets={"tavily_api_key": "..."}` when running with `OPENREWARD_SEARCH_BACKEND=tavily`. These fall back to the server process environment (`OPENREWARD_API_KEY` / `TAVILY_API_KEY`) if not passed. An unconfigured backend surfaces as a recoverable tool error rather than failing session creation.
 
 ## Safety
 

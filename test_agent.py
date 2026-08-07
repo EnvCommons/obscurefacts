@@ -1,7 +1,7 @@
 """Agent loop for ObscureFacts.
 
 ObscureFacts uses a one-argument @terminal tool: the grader is hidden from the
-model, which researches with web_search / fetch_url and then simply writes its
+model, which researches with web_search / web_fetch and then simply writes its
 answer as an ordinary message. The harness sees a message with no tool calls
 and routes its text to session.call_terminal_tool(), which grades it
 semantically against the reference answer.
@@ -9,8 +9,15 @@ semantically against the reference answer.
 Runs against the deployed environment by default; set LOCAL=1 to point at a
 local `python server.py` on port 8080.
 
-Writes a trajectory to obscurefacts_trajectory.jsonl (one JSON object per line:
-config, each turn, and a final summary).
+Search and fetch come from the SDK's WebToolset, so the search backend is
+configuration rather than code: the *environment server* picks it up from
+OPENREWARD_SEARCH_BACKEND (default "backsearch"; "tavily" also needs
+TAVILY_API_KEY and `pip install 'openreward[search]'`).
+
+Records each task as an OpenReward rollout (visible at
+https://openreward.ai/rollout/<id>) and also writes a local trajectory to
+obscurefacts_trajectory.jsonl (one JSON object per line: config, each turn, and
+a final summary).
 """
 
 import asyncio
@@ -43,11 +50,24 @@ async def main():
     ENV_NAME = "GeneralReasoning/ObscureFacts"
     SPLIT = os.environ.get("SPLIT", "train")
     NUM_TASKS = int(os.environ.get("NUM_TASKS", "2"))
+    MAX_TURNS = int(os.environ.get("MAX_TURNS", "30"))
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-    TAVILY_API_KEY = os.environ["TAVILY_API_KEY"]
+    # Search credentials are forwarded to the environment's WebToolset, which
+    # picks whichever the configured backend needs: `api_key` for the default
+    # backsearch backend, `tavily_api_key` when the environment server runs with
+    # OPENREWARD_SEARCH_BACKEND=tavily. Both are optional here.
+    OPENREWARD_API_KEY = os.environ.get("OPENREWARD_API_KEY", "")
+    TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
+    # Labels the recorded rollouts so runs against different search backends are
+    # distinguishable. The server is what actually resolves the backend; when
+    # running LOCAL=1 both processes see the same environment.
+    SEARCH_BACKEND = os.environ.get("OPENREWARD_SEARCH_BACKEND", "backsearch")
+    RUN_NAME = os.environ.get("RUN_NAME", f"obscurefacts-{SEARCH_BACKEND}")
 
-    # Deployed environment unless LOCAL=1.
-    base_url = "http://localhost:8080" if os.environ.get("LOCAL") else None
+    # Deployed environment unless LOCAL=1 (or ENV_URL points somewhere else).
+    base_url = os.environ.get("ENV_URL") or (
+        "http://localhost:8080" if os.environ.get("LOCAL") else None
+    )
     environment = or_client.environments.get(name=ENV_NAME, base_url=base_url)
     print(f"Environment: {ENV_NAME} ({base_url or 'deployed'})")
 
@@ -75,6 +95,8 @@ async def main():
         env=ENV_NAME,
         base_url=base_url or "deployed",
         split=SPLIT,
+        search_backend=SEARCH_BACKEND,
+        run_name=RUN_NAME,
         visible_tools=[t["name"] for t in tools],
         terminal_tool=None if terminal_tool is None else {
             "name": terminal_tool.name,
@@ -85,15 +107,31 @@ async def main():
 
     rewards = []
 
+    rollout_urls = []
+
     for task in tasks[:NUM_TASKS]:
         print(f"\n=== Task {task.task_spec['id']} ===")
         print(f"Question: {task.task_spec['question']}")
+
+        # One OpenReward rollout per task — the recorded trace shows the prompt,
+        # every search/fetch call and its result, and the graded reward.
+        rollout = or_client.rollout.create(
+            run_name=RUN_NAME,
+            rollout_name=f"task-{task.task_spec['id']}",
+            environment=ENV_NAME,
+            split=SPLIT,
+            task_spec=task.task_spec,
+            metadata={"model": MODEL_NAME, "search_backend": SEARCH_BACKEND},
+            print_messages=True,
+        )
+        rollout_urls.append(f"https://openreward.ai/rollout/{rollout.event_id}")
 
         async with environment.session(
             task=task,
             secrets={
                 "openai_api_key": OPENAI_API_KEY,
-                "tavily_api_key": TAVILY_API_KEY,
+                **({"api_key": OPENREWARD_API_KEY} if OPENREWARD_API_KEY else {}),
+                **({"tavily_api_key": TAVILY_API_KEY} if TAVILY_API_KEY else {}),
             },
         ) as session:
             # The whole point: ask the environment which convention it uses.
@@ -106,6 +144,7 @@ async def main():
 
             prompt = await session.get_prompt()
             input_list = [{"role": "user", "content": prompt[0].text}]
+            rollout.log_openai_response(input_list[0])
 
             record(
                 "task_start",
@@ -118,9 +157,8 @@ async def main():
 
             reward = None
             turn = 0
-            max_turns = 12
 
-            while turn < max_turns:
+            while turn < MAX_TURNS:
                 turn += 1
                 print(f"\n--- Turn {turn} ---")
 
@@ -130,6 +168,8 @@ async def main():
                     input=input_list,
                 )
                 input_list += response.output
+                # Logs every output item (reasoning, message, tool calls).
+                rollout.log_openai_response(response)
 
                 calls = [i for i in response.output if i.type == "function_call"]
 
@@ -142,6 +182,12 @@ async def main():
                             "call_id": item.call_id,
                             "output": tool_result.blocks[0].text,
                         })
+                        rollout.log_openai_response(
+                            input_list[-1],
+                            reward=tool_result.reward,
+                            is_finished=tool_result.finished,
+                            metadata=tool_result.metadata,
+                        )
                         preview = tool_result.blocks[0].text[:200]
                         print(f"Tool: {item.name}({json.dumps(args)[:120]})")
                         print(f"  -> {preview}...")
@@ -173,6 +219,13 @@ async def main():
 
                 out = await session.call_terminal_tool(final_message)
                 reward = out.reward
+                # The graded answer carries the episode reward in the trace.
+                rollout.log_openai_response(
+                    {"role": "assistant", "content": final_message},
+                    reward=reward,
+                    is_finished=True,
+                    metadata=out.metadata,
+                )
                 print(f"\ncall_terminal_tool -> reward={reward} finished={out.finished}")
                 print(out.blocks[0].text[:400])
                 record(
@@ -196,12 +249,20 @@ async def main():
         "num_scored": len(scored),
         "mean_reward": (sum(scored) / len(scored)) if scored else None,
         "rewards": rewards,
+        "search_backend": SEARCH_BACKEND,
+        "run_name": RUN_NAME,
+        "rollouts": rollout_urls,
     }
     record("summary", **summary)
     traj.close()
 
+    # Flush the background uploader before the process exits.
+    or_client.rollout.close()
+
     print(f"\n=== Summary ===\n{json.dumps(summary, indent=2)}")
     print(f"Trajectory written to {TRAJECTORY_PATH}")
+    for url in rollout_urls:
+        print(f"Rollout: {url}")
 
 
 if __name__ == "__main__":
