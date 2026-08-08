@@ -53,17 +53,114 @@ semantically graded against the reference answer.
 
 ### Choosing a search backend
 
-Which provider answers those two tools is configuration on the environment
-server, not code here — so swapping it needs no change to this environment:
+Which provider answers those two tools is configuration, not code here — so
+swapping it needs no change to this environment. Requires
+`openreward >= 0.1.152`.
 
-| `OPENREWARD_SEARCH_BACKEND` | Backend | Needs |
+| `OPENREWARD_SEARCH_BACKEND` | Sources | `as_of` cutoff | Extra install |
+|---|---|---|---|
+| unset (default) | `backsearch` — GR's backdated corpus: CC-News, SEC filings, arXiv | **honoured** — results bounded to the cutoff | none |
+| `tavily` | the live web | **ignored** (warned once) | `pip install 'openreward[search]'` |
+
+```bash
+# default — no configuration needed
+python server.py
+
+# route the same two tools to Tavily instead
+export OPENREWARD_SEARCH_BACKEND=tavily
+export TAVILY_API_KEY=tvly-...
+python server.py
+```
+
+An unset or unrecognised value falls back to `backsearch`; a *typo* logs a
+warning, an unset variable does not. Note that setting `TAVILY_API_KEY` does
+**not** by itself select Tavily — only `OPENREWARD_SEARCH_BACKEND` does, so a
+key sitting in a shared `.env` cannot silently reroute a run.
+
+**Which one should this environment use?** Empirically, **Tavily** — see
+[Backend trade-offs](#backend-trade-offs) below.
+
+### Credentials
+
+Both backends read their key from the session `secrets` mapping first, falling
+back to the server's process environment. The environment exposes
+`self.search_secrets = secrets` so the configured backend can pick out the name
+it needs:
+
+```python
+async with environment.session(
+    task=task,
+    secrets={
+        "openai_api_key": OPENAI_API_KEY,   # grader
+        "api_key":        OPENREWARD_API_KEY,   # backsearch
+        "tavily_api_key": TAVILY_API_KEY,       # tavily
+    },
+) as session:
+    ...
+```
+
+Pass only the ones the configured backend needs; the others are ignored.
+
+### Per-environment tuning
+
+These are read live on every tool call, so a `@property` or callable works as
+well as a plain attribute:
+
+| Attribute | Env var | Default | Purpose |
+|---|---|---|---|
+| `web_as_of` | `OPENREWARD_WEB_AS_OF` | today | Cutoff date, `YYYY-MM-DD`. Honoured by backdated backends only |
+| `web_max_fetch_chars` | `OPENREWARD_WEB_MAX_FETCH_CHARS` | 100,000 | How much page text `web_fetch` returns before truncating |
+| `web_include_snippets` | `OPENREWARD_WEB_INCLUDE_SNIPPETS` | off | Add each hit's snippet to `web_search` output, so the agent can triage without a follow-up fetch |
+| `search_backend` | `OPENREWARD_SEARCH_BACKEND` | `backsearch` | Pin the backend in code, for deployments where you cannot set process env |
+
+```python
+class ObscureFacts(Environment):
+    toolsets = [WebToolset]
+    web_include_snippets = True
+    web_max_fetch_chars = 20_000
+```
+
+### Errors the agent sees
+
+The toolset separates failures the agent can work around from ones it cannot,
+because the difference decides whether a broken rollout scores 0.0 or is
+discarded:
+
+| Kind | Examples | Behaviour |
 |---|---|---|
-| unset (default) | `backsearch` — GR's backdated corpus, bounded to an `as_of` cutoff | `OPENREWARD_API_KEY`, or `api_key` in session secrets |
-| `tavily` | Tavily — live web | `TAVILY_API_KEY` (or `tavily_api_key` in session secrets) and `pip install 'openreward[search]'` |
+| Recoverable | empty results, a page that will not extract, blocked domain, bad URL | Returned as tool output with the code in `metadata["error"]` — the agent tries something else |
+| Fatal | missing API key, exhausted quota, provider still failing after retries | Raises `SearchBackendUnavailable`, ending the rollout with a *blank* reward rather than a 0.0 that reads as a wrong answer |
 
-Tavily searches the live web and cannot bound results to a cutoff date, so keep
-the default `backsearch` backend wherever post-cutoff leakage would matter. See
-[Web Tools](https://docs.openreward.ai/environments/web-tools).
+Transient provider failures are retried three times with exponential backoff
+before being treated as fatal; a dead credential is not retried at all.
+
+### Backend trade-offs
+
+Running the same two tasks on each backend, same model, same environment code:
+
+| Backend | Result |
+|---|---|
+| `backsearch` | 1 of 2 answered — 14 turns and 15 searches on the other without converging |
+| `tavily` | 2 of 2 answered, in 3 and 4 turns |
+
+The questions here are reference-data lookups ("career Premier League
+appearances") that live on Wikipedia, Transfermarkt and 11v11 — not in a
+news/SEC/arXiv archive. `web_fetch` on a Wikipedia URL returns
+`no CC-News capture of ...` under `backsearch`, which is correct behaviour for a
+news corpus rather than a bug.
+
+So **this environment suits live search**, and it is the inverse of a prediction
+or forecasting task, where you would want `backsearch` precisely because it
+cannot see past its cutoff. Two caveats if you switch:
+
+- **`as_of` is silently ignored on Tavily.** Anything depending on a
+  leakage-free cutoff must stay on `backsearch`.
+- **`allowed_domains` is best-effort on Tavily.** It filters correctly for
+  indexed domains, but for one Tavily has *not* indexed (`reuters.com`, for
+  example) it silently returns unfiltered results instead of an empty set.
+
+See [Web Tools](https://docs.openreward.ai/environments/web-tools) for the full
+reference.
 
 ## Time Horizon
 
@@ -75,8 +172,9 @@ ObscureFacts is a multi-turn environment. Agents iteratively search the web, fet
 
 ## Other Environment Requirements
 
-- **OpenAI API key**: Required for LLM-based answer grading. Pass via `secrets={"openai_api_key": "..."}`.
-- **Search credentials**: Whatever the configured search backend needs — `secrets={"api_key": "..."}` for the default backsearch backend, or `secrets={"tavily_api_key": "..."}` when running with `OPENREWARD_SEARCH_BACKEND=tavily`. These fall back to the server process environment (`OPENREWARD_API_KEY` / `TAVILY_API_KEY`) if not passed. An unconfigured backend surfaces as a recoverable tool error rather than failing session creation.
+- **OpenAI API key**: Required for LLM-based answer grading. Pass via `secrets={"openai_api_key": "..."}`. Grader failures are deliberately not swallowed — "could not grade" is not the same as "answered wrongly", so they raise rather than scoring 0.0.
+- **Search credentials**: Whatever the configured search backend needs — see [Credentials](#credentials) above.
+- **`openreward >= 0.1.152`**: earlier releases either lack `WebToolset` (< 0.1.150) or ship a transport that ignores `HTTP_PROXY`/`HTTPS_PROXY`, which makes the web tools hang in a proxied deployment.
 
 ## Safety
 
