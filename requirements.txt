@@ -1,4 +1,4 @@
-openreward>=0.1.149
+openreward>=0.1.150
 pydantic>=2.0
 openai
 # Search and page fetch come from openreward's WebToolset. The default
