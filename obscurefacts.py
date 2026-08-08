@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
 import openai
 from pydantic import BaseModel
-from tavily import AsyncTavilyClient
 
 from openreward.environments import Environment, JSONObject, TextBlock, ToolOutput, terminal, tool
+from openreward.toolsets import WebToolset
 
 
 # ============= Data Loading =============
@@ -26,14 +25,6 @@ ANSWERS = {task["id"]: task["answer"] for task in TASKS}
 
 
 # ============= Pydantic Models for Tool Inputs =============
-class WebSearchInput(BaseModel):
-    query: str
-
-
-class FetchUrlInput(BaseModel):
-    url: str
-
-
 class SubmitAnswerInput(BaseModel):
     answer: str
 
@@ -42,12 +33,23 @@ class SubmitAnswerInput(BaseModel):
 class ObscureFacts(Environment):
     """
     ObscureFacts: A trivia question-answering environment requiring web search
-    to find answers to obscure factual questions. Uses Tavily for web search
-    and gpt-5-mini for semantic grading.
+    to find answers to obscure factual questions. Search and page fetch come
+    from the SDK's WebToolset; gpt-5-mini does the semantic grading.
     """
 
+    # web_search / web_fetch come from the SDK rather than being hand-rolled
+    # here. Which provider answers is process configuration
+    # (OPENREWARD_SEARCH_BACKEND, default "backsearch"), so changing search
+    # provider needs no change to this environment.
+    #
+    # WebToolset keeps the same error split this environment already relied on:
+    # an empty result set or an unfetchable page is tool output the agent can
+    # act on, while a missing key or exhausted quota raises so the rollout ends
+    # with a blank reward instead of a 0.0 that looks like a wrong answer.
+    toolsets = [WebToolset]
+
     def __init__(self, task_spec: JSONObject, secrets: dict[str, str] = {}) -> None:
-        super().__init__(task_spec)
+        super().__init__(task_spec, secrets)
 
         # Extract task info
         self.task_id = str(task_spec["id"])
@@ -61,15 +63,13 @@ class ObscureFacts(Environment):
                 "Pass secrets={'openai_api_key': 'your-key'} when creating session."
             )
 
-        tavily_api_key = secrets.get("tavily_api_key")
-        if not tavily_api_key:
-            raise ValueError(
-                "Tavily API key required in secrets parameter. "
-                "Pass secrets={'tavily_api_key': 'your-key'} when creating session."
-            )
-
         self.openai_client = openai.AsyncClient(api_key=openai_api_key)
-        self.tavily_client = AsyncTavilyClient(api_key=tavily_api_key)
+
+        # Read live by WebToolset on every tool call, so the search backend gets
+        # its credentials from the session rather than the server process. The
+        # configured backend takes the key it needs: `api_key` for backsearch,
+        # `tavily_api_key` for tavily.
+        self.search_secrets = secrets
 
         # Load golden answer from backend storage
         self.answer = ANSWERS.get(self.task_id)
@@ -94,120 +94,14 @@ class ObscureFacts(Environment):
         prompt_text = f"""Answer the following trivia question. These questions are intentionally obscure and may require extensive web searching to find the correct answer.
 
 You have access to the following tools:
-- web_search: Search the web for information
-- fetch_url: Get the full content of a specific URL
+- web_search: Search the web for information. Takes a query.
+- web_fetch: Get the content of a specific URL. Takes a url and a prompt describing what to extract from the page.
 
 Question: {self.question}
 
 Search thoroughly and verify your answer. When you have your answer, reply with it as an ordinary message (no tool call) — that message is graded."""
 
         return [TextBlock(text=prompt_text)]
-
-    MAX_TAVILY_ATTEMPTS = 3
-
-    async def _call_tavily(self, op, **kwargs):
-        """
-        Run a Tavily call with a bounded retry budget, then let the exception
-        propagate.
-
-        A transient blip is worth retrying; a persistent failure (plan/quota
-        limit, bad key, outage) must reach the platform, which retries the tool
-        call and terminates the rollout with a blank reward if it still fails.
-        Returning the error as tool output instead would leave the agent
-        re-issuing a dead call until the wall-clock cap, never reaching
-        submit_answer, and score the rollout 0.0 as though it had answered
-        wrongly.
-        """
-        for attempt in range(self.MAX_TAVILY_ATTEMPTS):
-            try:
-                return await op(**kwargs)
-            except Exception:
-                if attempt == self.MAX_TAVILY_ATTEMPTS - 1:
-                    raise
-                await asyncio.sleep(2 ** attempt)
-
-    @tool
-    async def web_search(self, params: WebSearchInput) -> ToolOutput:
-        """
-        Search the web using Tavily. Returns search results with titles, URLs, and snippets.
-        Use fetch_url tool to get full content from specific URLs if needed.
-        """
-        response = await self._call_tavily(
-            self.tavily_client.search,
-            query=params.query,
-            search_depth="basic",
-            max_results=5
-        )
-
-        # Format results. An empty result set is a real answer to the query,
-        # not a failure — the agent can act on it by searching differently.
-        results = response.get("results", [])
-        if not results:
-            return ToolOutput(
-                blocks=[TextBlock(text="No search results found.")],
-                metadata={"query": params.query, "results": []},
-                reward=0.0,
-                finished=False
-            )
-
-        # Build display text
-        display_parts = [f"Search results for: {params.query}\n"]
-        for i, result in enumerate(results, 1):
-            title = result.get("title", "No title")
-            url = result.get("url", "")
-            snippet = result.get("content", "")
-            display_parts.append(f"{i}. {title}\n   URL: {url}\n   {snippet}\n")
-
-        display_text = "\n".join(display_parts)
-
-        return ToolOutput(
-            blocks=[TextBlock(text=display_text)],
-            metadata={
-                "query": params.query,
-                "results": results,
-                "count": len(results)
-            },
-            reward=0.0,
-            finished=False
-        )
-
-    @tool
-    async def fetch_url(self, params: FetchUrlInput) -> ToolOutput:
-        """
-        Fetch and return the full text content from a specific URL using Tavily's extract method.
-        Use this after web_search to get complete information from a page.
-        """
-        response = await self._call_tavily(self.tavily_client.extract, urls=[params.url])
-
-        # A page Tavily can't extract is useful feedback — the agent should try
-        # another URL rather than have the rollout thrown away.
-        results = response.get("results", [])
-        if not results:
-            return ToolOutput(
-                blocks=[TextBlock(text=f"No content extracted from {params.url}")],
-                metadata={"url": params.url, "results": []},
-                reward=0.0,
-                finished=False
-            )
-
-        # Get the first result (we only passed one URL)
-        result = results[0]
-        raw_content = result.get("raw_content", "")
-
-        # Truncate if too long
-        max_length = 8000
-        if len(raw_content) > max_length:
-            raw_content = raw_content[:max_length] + "...\n[Content truncated]"
-
-        return ToolOutput(
-            blocks=[TextBlock(text=f"Content from {params.url}:\n\n{raw_content}")],
-            metadata={
-                "url": params.url,
-                "length": len(raw_content)
-            },
-            reward=0.0,
-            finished=False
-        )
 
     @terminal
     @tool

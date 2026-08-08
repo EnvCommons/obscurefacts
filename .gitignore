@@ -42,3 +42,6 @@ Thumbs.db
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local run output from test_agent.py
+obscurefacts_trajectory.jsonl
