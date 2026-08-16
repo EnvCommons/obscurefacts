@@ -38,15 +38,19 @@ class ObscureFacts(Environment):
     """
 
     # web_search / web_fetch come from the SDK rather than being hand-rolled
-    # here. Which provider answers is process configuration
-    # (OPENREWARD_SEARCH_BACKEND, default "backsearch"), so changing search
-    # provider needs no change to this environment.
+    # here.
     #
     # WebToolset keeps the same error split this environment already relied on:
     # an empty result set or an unfetchable page is tool output the agent can
     # act on, while a missing key or exhausted quota raises so the rollout ends
     # with a blank reward instead of a 0.0 that looks like a wrong answer.
     toolsets = [WebToolset]
+
+    # Pin the search provider to Tavily (live web). This env attribute is read
+    # by WebToolset on every tool call and takes precedence over the
+    # OPENREWARD_SEARCH_BACKEND process env var, so the process configuration
+    # cannot swap this environment onto another backend.
+    search_backend = "tavily"
 
     def __init__(self, task_spec: JSONObject, secrets: dict[str, str] = {}) -> None:
         super().__init__(task_spec, secrets)
@@ -65,10 +69,9 @@ class ObscureFacts(Environment):
 
         self.openai_client = openai.AsyncClient(api_key=openai_api_key)
 
-        # Read live by WebToolset on every tool call, so the search backend gets
-        # its credentials from the session rather than the server process. The
-        # configured backend takes the key it needs: `api_key` for backsearch,
-        # `tavily_api_key` for tavily.
+        # Read live by WebToolset on every tool call, so Tavily gets its
+        # credentials (`tavily_api_key`) from the session rather than the
+        # server process.
         self.search_secrets = secrets
 
         # Load golden answer from backend storage

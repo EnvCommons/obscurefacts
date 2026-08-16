@@ -9,10 +9,9 @@ semantically against the reference answer.
 Runs against the deployed environment by default; set LOCAL=1 to point at a
 local `python server.py` on port 8080.
 
-Search and fetch come from the SDK's WebToolset, so the search backend is
-configuration rather than code: the *environment server* picks it up from
-OPENREWARD_SEARCH_BACKEND (default "backsearch"; "tavily" also needs
-TAVILY_API_KEY and `pip install 'openreward[search]'`).
+Search and fetch come from the SDK's WebToolset. The environment pins its
+search backend to Tavily, so TAVILY_API_KEY (forwarded as the
+`tavily_api_key` session secret) is required for the web tools to work.
 
 Records each task as an OpenReward rollout (visible at
 https://openreward.ai/rollout/<id>) and also writes a local trajectory to
@@ -52,16 +51,12 @@ async def main():
     NUM_TASKS = int(os.environ.get("NUM_TASKS", "2"))
     MAX_TURNS = int(os.environ.get("MAX_TURNS", "30"))
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-    # Search credentials are forwarded to the environment's WebToolset, which
-    # picks whichever the configured backend needs: `api_key` for the default
-    # backsearch backend, `tavily_api_key` when the environment server runs with
-    # OPENREWARD_SEARCH_BACKEND=tavily. Both are optional here.
+    # Search credentials are forwarded to the environment's WebToolset. The
+    # environment pins its search backend to Tavily, so `tavily_api_key` is the
+    # one that matters.
     OPENREWARD_API_KEY = os.environ.get("OPENREWARD_API_KEY", "")
     TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
-    # Labels the recorded rollouts so runs against different search backends are
-    # distinguishable. The server is what actually resolves the backend; when
-    # running LOCAL=1 both processes see the same environment.
-    SEARCH_BACKEND = os.environ.get("OPENREWARD_SEARCH_BACKEND", "backsearch")
+    SEARCH_BACKEND = "tavily"  # pinned by the environment class
     RUN_NAME = os.environ.get("RUN_NAME", f"obscurefacts-{SEARCH_BACKEND}")
 
     # Deployed environment unless LOCAL=1 (or ENV_URL points somewhere else).

@@ -51,55 +51,24 @@ Grading runs through a hidden `@terminal` tool rather than a tool the agent can
 call: replying with a plain message ends the rollout, and that message text is
 semantically graded against the reference answer.
 
-### Choosing a search backend
+### Search backend
 
-Which provider answers those two tools is configuration, not code here — so
-swapping it needs no change to this environment. Requires
-`openreward >= 0.1.152`.
-
-| `OPENREWARD_SEARCH_BACKEND` | Sources | `as_of` cutoff | Extra install |
-|---|---|---|---|
-| unset (default) | `backsearch` — GR's backdated corpus: CC-News, SEC filings, arXiv | **honoured** — results bounded to the cutoff | none |
-| `tavily` | the live web | **ignored** (warned once) | `pip install 'openreward[search]'` |
-
-```bash
-# default — no configuration needed
-python server.py
-
-# route the same two tools to Tavily instead
-export OPENREWARD_SEARCH_BACKEND=tavily
-export TAVILY_API_KEY=tvly-...
-python server.py
-```
-
-An unset or unrecognised value falls back to `backsearch`; a *typo* logs a
-warning, an unset variable does not. Note that setting `TAVILY_API_KEY` does
-**not** by itself select Tavily — only `OPENREWARD_SEARCH_BACKEND` does, so a
-key sitting in a shared `.env` cannot silently reroute a run.
-
-**Which one should this environment use?** Empirically, **Tavily** — see
-[Backend trade-offs](#backend-trade-offs) below.
+The environment pins its search backend to **Tavily** (the live web) in code, via the `search_backend = "tavily"` class attribute. `WebToolset` reads that attribute on every tool call and it takes precedence over the `OPENREWARD_SEARCH_BACKEND` process env var, so process configuration cannot swap this environment onto another backend. Tavily support requires `pip install 'openreward[search]'`. The pin is empirical, not incidental — see [Why Tavily](#why-tavily) below.
 
 ### Credentials
 
-Both backends read their key from the session `secrets` mapping first, falling
-back to the server's process environment. The environment exposes
-`self.search_secrets = secrets` so the configured backend can pick out the name
-it needs:
+Tavily reads its key from the session `secrets` mapping first (`tavily_api_key`), falling back to the server's process environment (`TAVILY_API_KEY`). The environment exposes `self.search_secrets = secrets` so the toolset can pick the key out of the session:
 
 ```python
 async with environment.session(
     task=task,
     secrets={
         "openai_api_key": OPENAI_API_KEY,   # grader
-        "api_key":        OPENREWARD_API_KEY,   # backsearch
-        "tavily_api_key": TAVILY_API_KEY,       # tavily
+        "tavily_api_key": TAVILY_API_KEY,   # web_search / web_fetch
     },
 ) as session:
     ...
 ```
-
-Pass only the ones the configured backend needs; the others are ignored.
 
 ### Per-environment tuning
 
@@ -111,13 +80,12 @@ well as a plain attribute:
 | `web_as_of` | `OPENREWARD_WEB_AS_OF` | today | Cutoff date, `YYYY-MM-DD`. Honoured by backdated backends only |
 | `web_max_fetch_chars` | `OPENREWARD_WEB_MAX_FETCH_CHARS` | 100,000 | How much page text `web_fetch` returns before truncating |
 | `web_include_snippets` | `OPENREWARD_WEB_INCLUDE_SNIPPETS` | off | Add each hit's snippet to `web_search` output, so the agent can triage without a follow-up fetch |
-| `search_backend` | `OPENREWARD_SEARCH_BACKEND` | `backsearch` | Pin the backend in code, for deployments where you cannot set process env |
+| `search_backend` | `OPENREWARD_SEARCH_BACKEND` | `backsearch` | Pin the backend in code — this environment sets it to `tavily` |
 
 ```python
 class ObscureFacts(Environment):
     toolsets = [WebToolset]
-    web_include_snippets = True
-    web_max_fetch_chars = 20_000
+    search_backend = "tavily"
 ```
 
 ### Errors the agent sees
@@ -134,30 +102,19 @@ discarded:
 Transient provider failures are retried three times with exponential backoff
 before being treated as fatal; a dead credential is not retried at all.
 
-### Backend trade-offs
+### Why Tavily
 
-Running the same two tasks on each backend, same model, same environment code:
+Running the same two tasks on each available backend, same model, same environment code:
 
 | Backend | Result |
 |---|---|
-| `backsearch` | 1 of 2 answered — 14 turns and 15 searches on the other without converging |
-| `tavily` | 2 of 2 answered, in 3 and 4 turns |
+| `backsearch` (GR's backdated news/SEC/arXiv corpus) | 1 of 2 answered — 14 turns and 15 searches on the other without converging |
+| `tavily` (live web) | 2 of 2 answered, in 3 and 4 turns |
 
-The questions here are reference-data lookups ("career Premier League
-appearances") that live on Wikipedia, Transfermarkt and 11v11 — not in a
-news/SEC/arXiv archive. `web_fetch` on a Wikipedia URL returns
-`no CC-News capture of ...` under `backsearch`, which is correct behaviour for a
-news corpus rather than a bug.
+The questions here are reference-data lookups ("career Premier League appearances") that live on Wikipedia, Transfermarkt and 11v11 — not in a news/SEC/arXiv archive, which is why the environment pins the live-web backend. Two caveats that come with Tavily:
 
-So **this environment suits live search**, and it is the inverse of a prediction
-or forecasting task, where you would want `backsearch` precisely because it
-cannot see past its cutoff. Two caveats if you switch:
-
-- **`as_of` is silently ignored on Tavily.** Anything depending on a
-  leakage-free cutoff must stay on `backsearch`.
-- **`allowed_domains` is best-effort on Tavily.** It filters correctly for
-  indexed domains, but for one Tavily has *not* indexed (`reuters.com`, for
-  example) it silently returns unfiltered results instead of an empty set.
+- **`as_of` is silently ignored.** Nothing in this environment depends on a leakage-free cutoff, but a prediction or forecasting task would need a backdated backend instead.
+- **`allowed_domains` is best-effort.** It filters correctly for indexed domains, but for one Tavily has *not* indexed (`reuters.com`, for example) it silently returns unfiltered results instead of an empty set.
 
 See [Web Tools](https://docs.openreward.ai/environments/web-tools) for the full
 reference.
@@ -173,7 +130,7 @@ ObscureFacts is a multi-turn environment. Agents iteratively search the web, fet
 ## Other Environment Requirements
 
 - **OpenAI API key**: Required for LLM-based answer grading. Pass via `secrets={"openai_api_key": "..."}`. Grader failures are deliberately not swallowed — "could not grade" is not the same as "answered wrongly", so they raise rather than scoring 0.0.
-- **Search credentials**: Whatever the configured search backend needs — see [Credentials](#credentials) above.
+- **Tavily API key**: Required for the `web_search` and `web_fetch` tools. Pass via `secrets={"tavily_api_key": "..."}` — see [Credentials](#credentials) above.
 - **`openreward >= 0.1.152`**: earlier releases either lack `WebToolset` (< 0.1.150) or ship a transport that ignores `HTTP_PROXY`/`HTTPS_PROXY`, which makes the web tools hang in a proxied deployment.
 
 ## Safety
