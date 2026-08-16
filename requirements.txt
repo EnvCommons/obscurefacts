@@ -1,7 +1,8 @@
-openreward>=0.1.152
+openreward[search]>=0.1.152
 pydantic>=2.0
 openai
-# Search and page fetch come from openreward's WebToolset. The default
-# "backsearch" backend needs nothing extra; swap to Tavily with
-# OPENREWARD_SEARCH_BACKEND=tavily and uncomment the line below.
-# openreward[search]
+# Search and page fetch come from openreward's WebToolset. The [search] extra
+# ships tavily-python: the WebToolset selects the Tavily backend whenever a
+# tavily_api_key session secret is present (RL training passes one to every
+# session), and an image without the package kills the session on the first
+# web_search/web_fetch call with "[not-configured]".
