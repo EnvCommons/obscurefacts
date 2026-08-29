@@ -25,6 +25,11 @@ ANSWERS = {task["id"]: task["answer"] for task in TASKS}
 
 
 # ============= Pydantic Models for Tool Inputs =============
+# Reward for a submission made after the task has already been graded. Negative
+# so repeat submissions are actively discouraged, not merely left unscored.
+REPEAT_SUBMISSION_PENALTY = -0.1
+
+
 class SubmitAnswerInput(BaseModel):
     answer: str
 
@@ -68,6 +73,13 @@ class ObscureFacts(Environment):
             )
 
         self.openai_client = openai.AsyncClient(api_key=openai_api_key)
+
+        # Graded submissions this session. @terminal already hides this tool from
+        # the model, so the harness normally invokes it once at the end of the
+        # rollout -- but Environment._call_tool dispatches by name and does not
+        # exclude terminal tools, so a direct second call would re-grade and pay
+        # out again. Defence in depth.
+        self.submitted = 0
 
         # Read live by WebToolset on every tool call, so Tavily gets its
         # credentials (`tavily_api_key`) from the session rather than the
@@ -116,6 +128,16 @@ Search thoroughly and verify your answer. When you have your answer, reply with 
         an ordinary message rather than calling a tool. The harness routes that
         message text here for semantic LLM grading, and the episode ends.
         """
+        if self.submitted > 0:
+            return ToolOutput(
+                blocks=[TextBlock(text="An answer has already been submitted for this task. "
+                                       "This episode is over: it is not re-graded, and repeat "
+                                       "submissions are penalised (reward -0.1).")],
+                metadata={"already_submitted": True, "submission_count": self.submitted},
+                reward=REPEAT_SUBMISSION_PENALTY,
+                finished=True,
+            )
+
         grader_result = await self._grade_answer(params.answer)
 
         reward = grader_result["reward"]
@@ -132,6 +154,8 @@ Evaluation:
 
 Reference Answer: {self.answer}
 """
+
+        self.submitted += 1
 
         return ToolOutput(
             blocks=[TextBlock(text=display_text)],
