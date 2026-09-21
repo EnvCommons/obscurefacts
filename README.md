@@ -4,11 +4,11 @@
 
 ## Description
 
-ObscureFacts is an environment for evaluating an agent's ability to find answers to obscure trivia questions using web search. Agents must use web search tools to research and answer 49 intentionally difficult factual questions spanning sports, technology, local history, and academia.
+ObscureFacts is an environment for evaluating an agent's ability to find answers to obscure trivia questions using web search. Agents must use web search tools to research and answer 50 intentionally difficult factual questions spanning sports, technology, local history, and academia.
 
 ## Capabilities
 
-- Web search and information retrieval
+- Backdated web search and information retrieval
 - Multi-step research and evidence synthesis
 - Answering obscure factual questions across diverse domains
 - Extracting specific facts from web content
@@ -25,7 +25,7 @@ Agents are given a standard environment with no special compute requirements.
 
 There is one split in this environment:
 
-- **Test**: 49 obscure trivia questions
+- **Train**: 50 obscure trivia questions
 
 Questions span diverse domains including sports statistics, technology history, local history, and academic trivia.
 
@@ -35,89 +35,44 @@ This is a multi-turn environment. The agent searches the web, gathers informatio
 
 ## Data
 
-Task data consists of 49 curated trivia questions with reference answers stored in a JSON file. Task data is stored on the OpenReward platform.
+Task data consists of 50 curated trivia questions with reference answers stored in a JSON file. Task data is stored on the OpenReward platform.
 
 ## Tools
 
-Search and fetch come from the OpenReward SDK's `WebToolset`
-(`toolsets = [WebToolset]`) rather than being implemented in this environment.
+Search and fetch come from the OpenReward SDK's backdated web toolset (a `BackSearchToolset` subclass declared via `toolsets = [ObscureFactsBackSearch]`) rather than being implemented in this environment. Both tools read OpenReward's backsearch corpus as it stood on the day the session started.
 
 | Tool | Description |
 |------|-------------|
-| `web_search` | Search the web. Takes a `query` and optional `allowed_domains` **or** `blocked_domains`; returns a `Links:` list of `{title, url}` sources. |
-| `web_fetch` | Fetch the content of a URL. Takes a `url` and a `prompt` describing what to extract (truncated to 100 KB). |
+| `web_search` | Search the backdated web corpus. Takes a `query` and optional `allowed_domains` **or** `blocked_domains`; returns a `Links:` list of up to 8 `{title, url, snippet}` hits fanned out over the backend's default corpora (news, SEC filings, Wikipedia, general web, live captures, arXiv). |
+| `web_fetch` | Fetch the archived text of a URL as it existed on or before the session's start date. Takes a `url` and a `prompt` describing what to extract (truncated to 100 KB). A fetch that 404s on a percent-encoded URL is retried with the path decoded, because the archive stores Wikipedia titles in raw Unicode. |
 
-Grading runs through a hidden `@terminal` tool rather than a tool the agent can
-call: replying with a plain message ends the rollout, and that message text is
-semantically graded against the reference answer.
+Grading runs through a hidden `@terminal` tool rather than a tool the agent can call: replying with a plain message ends the rollout, and that message text is semantically graded against the reference answer.
 
 ### Search backend
 
-The environment pins its search backend to **Tavily** (the live web) in code, via the `search_backend = "tavily"` class attribute. `WebToolset` reads that attribute on every tool call and it takes precedence over the `OPENREWARD_SEARCH_BACKEND` process env var, so process configuration cannot swap this environment onto another backend. Tavily support requires `pip install 'openreward[search]'`. The pin is empirical, not incidental — see [Why Tavily](#why-tavily) below.
-
-### Credentials
-
-Tavily reads its key from the session `secrets` mapping first (`tavily_api_key`), falling back to the server's process environment (`TAVILY_API_KEY`). The environment exposes `self.search_secrets = secrets` so the toolset can pick the key out of the session:
-
-```python
-async with environment.session(
-    task=task,
-    secrets={
-        "openai_api_key": OPENAI_API_KEY,   # grader
-        "tavily_api_key": TAVILY_API_KEY,   # web_search / web_fetch
-    },
-) as session:
-    ...
-```
-
-### Per-environment tuning
-
-These are read live on every tool call, so a `@property` or callable works as
-well as a plain attribute:
-
-| Attribute | Env var | Default | Purpose |
-|---|---|---|---|
-| `web_as_of` | `OPENREWARD_WEB_AS_OF` | today | Cutoff date, `YYYY-MM-DD`. Honoured by backdated backends only |
-| `web_max_fetch_chars` | `OPENREWARD_WEB_MAX_FETCH_CHARS` | 100,000 | How much page text `web_fetch` returns before truncating |
-| `web_include_snippets` | `OPENREWARD_WEB_INCLUDE_SNIPPETS` | off | Add each hit's snippet to `web_search` output, so the agent can triage without a follow-up fetch |
-| `search_backend` | `OPENREWARD_SEARCH_BACKEND` | `backsearch` | Pin the backend in code — this environment sets it to `tavily` |
-
-```python
-class ObscureFacts(Environment):
-    toolsets = [WebToolset]
-    search_backend = "tavily"
-```
+The environment is pinned to **backsearch**, OpenReward's point-in-time web archive, in code. The cutoff (`web_as_of`) is set once per session in the environment's constructor to the UTC date the session starts, and the toolset reads it on every call, so it outranks the `OPENREWARD_WEB_AS_OF` env var. Unlike the SDK's swappable `WebToolset`, this toolset cannot be switched to a live-web provider by an environment variable. No corpus is pinned: naming corpora replaces the backend's default set rather than extending it.
 
 ### Errors the agent sees
 
-The toolset separates failures the agent can work around from ones it cannot,
-because the difference decides whether a broken rollout scores 0.0 or is
-discarded:
+The toolset separates failures the agent can work around from ones it cannot, because the difference decides whether a broken rollout scores 0.0 or is discarded:
 
 | Kind | Examples | Behaviour |
 |---|---|---|
-| Recoverable | empty results, a page that will not extract, blocked domain, bad URL | Returned as tool output with the code in `metadata["error"]` — the agent tries something else |
+| Recoverable | empty results, a page not in the archive, blocked domain, bad URL | Returned as tool output with the code in `metadata["error"]` — the agent tries something else |
 | Fatal | missing API key, exhausted quota, provider still failing after retries | Raises `SearchBackendUnavailable`, ending the rollout with a *blank* reward rather than a 0.0 that reads as a wrong answer |
 
-Transient provider failures are retried three times with exponential backoff
-before being treated as fatal; a dead credential is not retried at all.
+Transient backend failures are retried three times with exponential backoff before being treated as fatal. The environment also fails fast at session start if the backdated web service is not configured.
 
-### Why Tavily
+### Backsearch vs Tavily
 
-Running the same two tasks on each available backend, same model, same environment code:
+This environment previously pinned Tavily (the live web) on the strength of a two-task comparison made when backsearch covered only news, SEC filings and arXiv. With the Wikipedia, general-web and live-capture corpora now in the archive, a paired A/B on 2026-09-21 (gpt-5.2, same environment code, only the backend flipped, 20 tasks per arm) found no difference:
 
-| Backend | Result |
-|---|---|
-| `backsearch` (GR's backdated news/SEC/arXiv corpus) | 1 of 2 answered — 14 turns and 15 searches on the other without converging |
-| `tavily` (live web) | 2 of 2 answered, in 3 and 4 turns |
+| Backend | Mean reward (unanswered = 0) | Wins / ties / losses | Fetch failures |
+|---|---|---|---|
+| `backsearch` | 0.50 | 3 / 12 / 3 | 15% (pages not in the archive) |
+| `tavily` | 0.50 | 3 / 12 / 3 | 18% (anti-bot blocks) |
 
-The questions here are reference-data lookups ("career Premier League appearances") that live on Wikipedia, Transfermarkt and 11v11 — not in a news/SEC/arXiv archive, which is why the environment pins the live-web backend. Two caveats that come with Tavily:
-
-- **`as_of` is silently ignored.** Nothing in this environment depends on a leakage-free cutoff, but a prediction or forecasting task would need a backdated backend instead.
-- **`allowed_domains` is best-effort.** It filters correctly for indexed domains, but for one Tavily has *not* indexed (`reuters.com`, for example) it silently returns unfiltered results instead of an empty set.
-
-See [Web Tools](https://docs.openreward.ai/environments/web-tools) for the full
-reference.
+Backsearch also returns far fewer social and video pages (2% of hits vs 31% for Tavily) and does not need a second vendor key. See [Backdated Web Tools](https://docs.openreward.ai/environments/backdated-web-tools) for the full reference.
 
 ## Time Horizon
 
@@ -130,8 +85,7 @@ ObscureFacts is a multi-turn environment. Agents iteratively search the web, fet
 ## Other Environment Requirements
 
 - **OpenAI API key**: Required for LLM-based answer grading. Pass via `secrets={"openai_api_key": "..."}`. Grader failures are deliberately not swallowed — "could not grade" is not the same as "answered wrongly", so they raise rather than scoring 0.0.
-- **Tavily API key**: Required for the `web_search` and `web_fetch` tools. Pass via `secrets={"tavily_api_key": "..."}` — see [Credentials](#credentials) above.
-- **`openreward >= 0.1.152`**: earlier releases either lack `WebToolset` (< 0.1.150) or ship a transport that ignores `HTTP_PROXY`/`HTTPS_PROXY`, which makes the web tools hang in a proxied deployment.
+- **`openreward >= 0.1.158`**: the SDK release the backdated toolset and its corpus fan-out were verified against.
 
 ## Safety
 

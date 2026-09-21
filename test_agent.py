@@ -9,9 +9,10 @@ semantically against the reference answer.
 Runs against the deployed environment by default; set LOCAL=1 to point at a
 local `python server.py` on port 8080.
 
-Search and fetch come from the SDK's WebToolset. The environment pins its
-search backend to Tavily, so TAVILY_API_KEY (forwarded as the
-`tavily_api_key` session secret) is required for the web tools to work.
+Search and fetch come from the SDK's backdated toolset (OpenReward's backsearch
+corpus, cutoff = the day the session starts). The web tools authenticate with
+an OpenReward key: the server process reads OPENREWARD_API_KEY, or pass it as
+the `api_key` session secret (this script does both when the variable is set).
 
 Records each task as an OpenReward rollout (visible at
 https://openreward.ai/rollout/<id>) and also writes a local trajectory to
@@ -51,12 +52,10 @@ async def main():
     NUM_TASKS = int(os.environ.get("NUM_TASKS", "2"))
     MAX_TURNS = int(os.environ.get("MAX_TURNS", "30"))
     OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
-    # Search credentials are forwarded to the environment's WebToolset. The
-    # environment pins its search backend to Tavily, so `tavily_api_key` is the
-    # one that matters.
+    # Forwarded as the `api_key` session secret so backsearch can take its key
+    # from the session rather than the server process.
     OPENREWARD_API_KEY = os.environ.get("OPENREWARD_API_KEY", "")
-    TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
-    SEARCH_BACKEND = "tavily"  # pinned by the environment class
+    SEARCH_BACKEND = "backsearch"  # pinned by the environment class
     RUN_NAME = os.environ.get("RUN_NAME", f"obscurefacts-{SEARCH_BACKEND}")
 
     # Deployed environment unless LOCAL=1 (or ENV_URL points somewhere else).
@@ -126,7 +125,6 @@ async def main():
             secrets={
                 "openai_api_key": OPENAI_API_KEY,
                 **({"api_key": OPENREWARD_API_KEY} if OPENREWARD_API_KEY else {}),
-                **({"tavily_api_key": TAVILY_API_KEY} if TAVILY_API_KEY else {}),
             },
         ) as session:
             # The whole point: ask the environment which convention it uses.

@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Optional
+from urllib.parse import unquote, urlsplit, urlunsplit
 
 import openai
 from pydantic import BaseModel
 
 from openreward.environments import Environment, JSONObject, TextBlock, ToolOutput, terminal, tool
-from openreward.toolsets import WebToolset
+from openreward.toolsets import BackSearchToolset
+from openreward.toolsets._web_common import WebFetchParams, WebSearchParams, to_tool_output
+from openreward.tools.web import FETCH_DESCRIPTION, SEARCH_DESCRIPTION, run_fetch, run_search
+from openreward.web_service import WebServiceConfig
 
 
 # ============= Data Loading =============
@@ -34,28 +40,107 @@ class SubmitAnswerInput(BaseModel):
     answer: str
 
 
+# ============= Backdated web tools =============
+def today_utc_iso() -> str:
+    """Today's date in UTC as ISO ``YYYY-MM-DD`` — the backsearch cutoff.
+
+    UTC rather than the server's local date so every replica of the env agrees
+    on the cutoff regardless of the timezone it happens to run in.
+    """
+    return datetime.now(timezone.utc).date().isoformat()
+
+
+def _unquote_url_path(url: str) -> str:
+    """``https://en.wikipedia.org/wiki/Petr_%C4%8Cech`` -> ``.../Petr_Čech``.
+
+    The backsearch fetch index matches URLs byte-for-byte and stores Wikipedia
+    titles in their raw Unicode form, while models emit the percent-encoded form
+    a browser shows. Decoding the path (only) turns that 404 into a hit.
+    """
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, unquote(parts.path), parts.query, parts.fragment))
+
+
+class ObscureFactsBackSearch(BackSearchToolset):
+    """BackSearchToolset with four adjustments, all backdating-preserving.
+
+    First, the session's secrets (``api_key`` / ``openreward_api_key``) are
+    consulted when building the web-service config, falling back to the process
+    environment's ``OPENREWARD_API_KEY`` — the stock toolset reads the process
+    env only. Second, ``web_search`` passes ``include_snippets=True`` so results
+    carry text snippets instead of bare titles and URLs, letting the agent
+    triage hits without a fetch per candidate. Third, fatal backend errors (a
+    missing key, an exhausted quota) raise ``SearchBackendUnavailable`` instead
+    of becoming tool output: handed back as text, the agent would re-issue a
+    dead call until the turn cap and the rollout would score 0.0 as though the
+    model had answered wrongly, rather than being discarded as an
+    infrastructure failure. Fourth, a fetch that 404s on a percent-encoded URL
+    is retried with the path decoded (see ``_unquote_url_path``).
+
+    The cutoff still resolves through the parent's ``_current_as_of``
+    (``env.web_as_of``, the UTC date the session was created) on every call.
+    No ``corpus`` is pinned, so the backend fans out over its default corpora
+    (news, SEC filings, Wikipedia, general web, live captures, arXiv) — naming
+    corpora *replaces* that set rather than extending it. Unlike the SDK's
+    swappable web toolset, this one cannot be switched to a live-web provider
+    by an environment variable.
+    """
+
+    def __init__(self, env: Optional[Any] = None, **kwargs: Any) -> None:
+        if kwargs.get("config") is None:
+            secrets = getattr(env, "search_secrets", None)
+            kwargs["config"] = WebServiceConfig.from_env(secrets)
+        super().__init__(env, **kwargs)
+
+    @tool
+    async def web_search(self, params: WebSearchParams) -> ToolOutput:
+        result = await run_search(
+            query=params.query,
+            as_of=self._current_as_of(),
+            allowed_domains=params.allowed_domains,
+            blocked_domains=params.blocked_domains,
+            config=self.config,
+            include_snippets=True,
+        )
+        return to_tool_output(result, raise_on_fatal=True)
+
+    @tool
+    async def web_fetch(self, params: WebFetchParams) -> ToolOutput:
+        as_of = self._current_as_of()
+        result = await run_fetch(url=params.url, prompt=params.prompt, as_of=as_of, config=self.config)
+        if (
+            not result.ok
+            and result.error_code == "web-service-error"
+            and "HTTP 404" in (result.output or "")
+            and "%" in params.url
+        ):
+            decoded = _unquote_url_path(params.url)
+            if decoded != params.url:
+                retry = await run_fetch(url=decoded, prompt=params.prompt, as_of=as_of, config=self.config)
+                if retry.ok:
+                    result = retry
+        return to_tool_output(result, raise_on_fatal=True)
+
+
+# The environment framework reads ``fn.__doc__`` for each tool's description.
+ObscureFactsBackSearch.web_search.__doc__ = SEARCH_DESCRIPTION
+ObscureFactsBackSearch.web_fetch.__doc__ = FETCH_DESCRIPTION
+
+
 # ============= Environment Class =============
 class ObscureFacts(Environment):
     """
     ObscureFacts: A trivia question-answering environment requiring web search
     to find answers to obscure factual questions. Search and page fetch come
-    from the SDK's WebToolset; gpt-5-mini does the semantic grading.
+    from the SDK's backdated toolset (OpenReward's backsearch corpus, cutoff =
+    the day the session starts); gpt-5-mini does the semantic grading.
     """
 
-    # web_search / web_fetch come from the SDK rather than being hand-rolled
-    # here.
-    #
-    # WebToolset keeps the same error split this environment already relied on:
-    # an empty result set or an unfetchable page is tool output the agent can
-    # act on, while a missing key or exhausted quota raises so the rollout ends
-    # with a blank reward instead of a 0.0 that looks like a wrong answer.
-    toolsets = [WebToolset]
-
-    # Pin the search provider to Tavily (live web). This env attribute is read
-    # by WebToolset on every tool call and takes precedence over the
-    # OPENREWARD_SEARCH_BACKEND process env var, so the process configuration
-    # cannot swap this environment onto another backend.
-    search_backend = "tavily"
+    # web_search / web_fetch come from the SDK's backdated toolset, pinned to
+    # OpenReward's backsearch corpus. The cutoff (``web_as_of``) is set per
+    # session in ``__init__`` to the UTC date the session was created, and the
+    # toolset reads it live on every call.
+    toolsets = [ObscureFactsBackSearch]
 
     def __init__(self, task_spec: JSONObject, secrets: dict[str, str] = {}) -> None:
         super().__init__(task_spec, secrets)
@@ -81,10 +166,24 @@ class ObscureFacts(Environment):
         # out again. Defence in depth.
         self.submitted = 0
 
-        # Read live by WebToolset on every tool call, so Tavily gets its
-        # credentials (`tavily_api_key`) from the session rather than the
+        # Backsearch cutoff: the UTC date this session was created. Read live
+        # by ObscureFactsBackSearch on every tool call (it outranks the
+        # OPENREWARD_WEB_AS_OF env var), so the agent sees the web as it stood
+        # on the day it started researching.
+        self.web_as_of = today_utc_iso()
+
+        # Read by ObscureFactsBackSearch when it builds its config, so the
+        # backsearch key can come from the session (`api_key`) rather than the
         # server process.
         self.search_secrets = secrets
+
+        # Fail fast if the backdated web service is unconfigured. Without this
+        # the first search would raise mid-rollout instead of at session start.
+        if WebServiceConfig.from_env(secrets) is None:
+            raise ValueError(
+                "Backdated web service is not configured: set OPENREWARD_API_KEY "
+                "in the server process environment (or pass api_key in secrets)."
+            )
 
         # Load golden answer from backend storage
         self.answer = ANSWERS.get(self.task_id)
