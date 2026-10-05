@@ -55,7 +55,7 @@ def incorrect_reply(task: dict) -> str:
 def visible_to_agent(result) -> str:
     """Everything the agent can see in a result, minus its own submitted answer."""
     metadata = {k: v for k, v in (result.metadata or {}).items() if k != "submitted_answer"}
-    return "\n".join(b.text for b in result.blocks) + "\n" + json.dumps(metadata)
+    return "\n".join(b.text for b in result.blocks) + "\n" + json.dumps(metadata, ensure_ascii=False)
 
 
 @pytest.mark.asyncio
