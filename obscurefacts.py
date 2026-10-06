@@ -314,18 +314,11 @@ Search thoroughly and verify your answer. When you have your answer, reply with 
 
         reward = grader_result["reward"]
         is_correct = grader_result["is_correct"]
-        justification = grader_result["justification"]
 
-        # Format display
-        result_text = "CORRECT" if is_correct else "INCORRECT"
-
-        display_text = f"""{result_text}
-
-Evaluation:
-{justification}
-
-Reference Answer: {self.answer}
-"""
+        # The result carries the verdict and the agent's own answer only. The
+        # grader's justification is left out because it restates the golden
+        # answer.
+        display_text = "CORRECT" if is_correct else "INCORRECT"
 
         self.submitted += 1
 
@@ -334,9 +327,7 @@ Reference Answer: {self.answer}
             metadata={
                 "task_id": self.task_id,
                 "submitted_answer": params.answer,
-                "golden_answer": self.answer,
                 "is_correct": is_correct,
-                "justification": justification,
             },
             reward=reward,
             finished=True
