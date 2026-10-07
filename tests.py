@@ -115,3 +115,11 @@ async def test_repeat_submission_is_penalised_and_not_regraded():
     assert second.reward == obscurefacts.REPEAT_SUBMISSION_PENALTY
     assert second.metadata == {"already_submitted": True, "submission_count": 1}
     assert len(completions.prompts) == 1
+
+
+def test_canary_wharf_question_names_the_overground_direction():
+    # One overground stop from Whitechapel is Shoreditch High Street northbound
+    # and Shadwell southbound, so the question has to say which way.
+    task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_028")
+    assert "north" in task["question"]
+    assert task["answer"] == "Shoreditch High Street"
