@@ -123,3 +123,19 @@ def test_canary_wharf_question_names_the_overground_direction():
     task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_028")
     assert "north" in task["question"]
     assert task["answer"] == "Shoreditch High Street"
+
+
+def test_benoit_final_opponent_age_uses_1978_birth_year():
+    # Benoit's last match was against Elijah Burke on 19 June 2007. Wrestling
+    # databases and Wikidata give Burke a 1978 birth date (11 April or 24 May),
+    # so he was 29; the 1981 year in the current Wikipedia text is unsourced.
+    task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_004")
+    assert task["answer"] == "29"
+
+
+def test_abc_store_count_question_is_dropped():
+    # A count of shopfronts "visible" along a street depends on the walker and
+    # changes as stores open and close, so it has no checkable answer.
+    ids = [t["id"] for t in obscurefacts.TASKS]
+    assert "obscure_029" not in ids
+    assert len(ids) == len(set(ids)) == 49

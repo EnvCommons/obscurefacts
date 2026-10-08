@@ -17,7 +17,7 @@
     {
         "id": "obscure_004",
         "question": "How old was Chris Benoit's final opponent?",
-        "answer": "26"
+        "answer": "29"
     },
     {
         "id": "obscure_005",
@@ -140,11 +140,6 @@
         "answer": "Shoreditch High Street"
     },
     {
-        "id": "obscure_029",
-        "question": "How many ABC stores would I pass (and would be visible) if I walked from Ritz-Carlton Waikiki to Surfrider Moana hotel in Waikiki down Kalakaua Avenue?",
-        "answer": "4"
-    },
-    {
         "id": "obscure_030",
         "question": "Papers with Code team once tried to make an evaluation infrastructure product. What was it called?",
         "answer": "Sotabench"
@@ -243,8 +238,7 @@
         "id": "obscure_049",
         "question": "Thinking of a restaurant chain that has several stores in London, has a \"chocolate bombe\" as a dessert, and the decor is green and tropical.",
         "answer": "The Ivy"
-    }
-    ,
+    },
     {
         "id": "obscure_050",
         "question": "Little bit of onion....smells fantastic...mmmm. It's feeding time...Sometimes I pray, what can I do? what can I do?....Welcome to Hokkaido! Wow, this looks amazing....there are all excerpts from a advertisement for a TV show. Which channel was the ad shown?",
