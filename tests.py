@@ -125,17 +125,55 @@ def test_canary_wharf_question_names_the_overground_direction():
     assert task["answer"] == "Shoreditch High Street"
 
 
-def test_benoit_final_opponent_age_uses_1978_birth_year():
-    # Benoit's last match was against Elijah Burke on 19 June 2007. Wrestling
-    # databases and Wikidata give Burke a 1978 birth date (11 April or 24 May),
-    # so he was 29; the 1981 year in the current Wikipedia text is unsourced.
+def test_benoit_final_opponent_age_follows_wikipedia():
+    # Benoit's last match was against Elijah Burke on 19 June 2007. Wikipedia
+    # gives Burke's birth date as 24 May 1981, so he was 26; Cagematch and
+    # Wikidata give 1978, which would make him 29. The reference stays at 26.
     task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_004")
-    assert task["answer"] == "29"
+    assert task["answer"] == "26"
 
 
-def test_abc_store_count_question_is_dropped():
-    # A count of shopfronts "visible" along a street depends on the walker and
-    # changes as stores open and close, so it has no checkable answer.
+def test_tasks_keep_their_positions():
+    # Training runs pin the task count and address tasks by position
+    # (task_train_<i> is TASKS[i]), so fixes are made in place: no task is
+    # removed, added or reordered while a run depends on the list. obscure_029
+    # (the ABC Stores count) stays until a restart re-pins the count.
     ids = [t["id"] for t in obscurefacts.TASKS]
-    assert "obscure_029" not in ids
-    assert len(ids) == len(set(ids)) == 49
+    assert ids == [f"obscure_{i:03d}" for i in range(1, 51)]
+
+
+def test_clough_league_cup_count():
+    # Forest won the League Cup four times under Clough: 1978, 1979, 1989, 1990.
+    task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_003")
+    assert task["answer"] == "4 (1978, 1979, 1989, 1990)"
+
+
+def test_trust_me_question_names_honolulu():
+    # Sushi Nozawa in Los Angeles was also known for "Trust Me", and "in the
+    # Pacific" read as the Pacific coast. The reference is the Honolulu Sasabune.
+    task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_025")
+    assert "Honolulu" in task["question"]
+    assert task["answer"] == "Sushi Sasabune"
+
+
+def test_general_reasoning_question_does_not_imply_an_ipo():
+    # The company is private, so "first went public" read as asking about an IPO.
+    task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_033")
+    assert "went public" not in task["question"]
+    assert "launched publicly" in task["question"]
+
+
+def test_treasury_deputy_director_name_is_spelled_correctly():
+    task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_040")
+    assert task["answer"] == "Gwyneth Nurse"
+
+
+def test_transformer_week_question_singles_out_selu():
+    # arXiv v1 dates: SELU 8 June 2017, "Attention Is All You Need" 12 June.
+    # "Deep RL from Human Preferences" shares the Transformer's day and several
+    # other well-known papers fall within a week of it, so the question names
+    # the lab's country: SELU came from JKU Linz, Austria.
+    task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_048")
+    assert "within a week" in task["question"]
+    assert "Austrian" in task["question"]
+    assert "SELU" in task["answer"]
