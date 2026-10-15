@@ -125,12 +125,13 @@ def test_canary_wharf_question_names_the_overground_direction():
     assert task["answer"] == "Shoreditch High Street"
 
 
-def test_benoit_final_opponent_age_follows_wikipedia():
+def test_benoit_final_opponent_age_accepts_both_birth_years():
     # Benoit's last match was against Elijah Burke on 19 June 2007. Wikipedia
     # gives Burke's birth date as 24 May 1981, so he was 26; Cagematch and
-    # Wikidata give 1978, which would make him 29. The reference stays at 26.
+    # Wikidata give 1978, which makes him 29. Sources disagree, so both ages
+    # are accepted.
     task = next(t for t in obscurefacts.TASKS if t["id"] == "obscure_004")
-    assert task["answer"] == "26"
+    assert task["answer"] == "26 or 29 (either answer acceptable)"
 
 
 def test_tasks_keep_their_positions():
